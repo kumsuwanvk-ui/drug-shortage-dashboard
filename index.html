@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ระบบแจ้งสถานะยาขาดคลัง (Drug Shortage Dashboard)</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style> body { font-family: 'Prompt', sans-serif; } </style>
 </head>
@@ -91,31 +90,77 @@
   </main>
 
   <script>
-    const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTei4cEazVvl35auQEcyHkjD9_SydkzxBC9-GHXsNmMrSArtg4Sf3lWDVzDTUd5inlimijn08KlSTdq/pub?gid=0&single=true&output=csv';
+    // 1. ID ไฟล์ข้อมูลยาหลัก
+    const DRUG_DB_ID = '1lEfUkbS61fEm41dXq_Lp4oT-RtnyEdHCWgrNbx8zz4g';
+    
+    // 2. ID ไฟล์ตอบกลับจาก Google Form (เก็บลิงก์ไฟล์)
+    const FORM_RESPONSES_ID = '15XM8DK5ddLTKWlkx-iQW9CS_9czWh8AZf-7iabkuW34';
 
     let allDrugs = [];
 
-    function fetchDrugData() {
-      Papa.parse(GOOGLE_SHEET_CSV_URL, {
-        download: true,
-        header: false, // อ่านแบบ Array ตรงเพื่อความเร็วสูงสุด ไม่ติดเรื่องชื่อ Header
-        skipEmptyLines: true,
-        complete: function(results) {
-          if (results.data && results.data.length > 1) {
-            // ตัดบรรทัดแรกที่เป็น Header ออก
-            allDrugs = results.data.slice(1);
-          } else {
-            allDrugs = [];
+    // ฟังก์ชันช่วยดึงข้อมูลด้วย GViz API ความเร็วสูง
+    async function fetchGViz(sheetId, sheetName = '') {
+      const querySheet = sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : '';
+      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json${querySheet}`;
+      const res = await fetch(url);
+      const text = await res.text();
+      const json = JSON.parse(text.substring(47, text.length - 2));
+      return json.table.rows || [];
+    }
+
+    async function fetchAllData() {
+      try {
+        // ดึงทั้ง 2 ชีตพร้อมกัน (Parallel) เพื่อความรวดเร็ว
+        const [mainRows, formRows] = await Promise.all([
+          fetchGViz(DRUG_DB_ID),
+          fetchGViz(FORM_RESPONSES_ID)
+        ]);
+
+        // สร้าง Map ของไฟล์แนบ (Key: ชื่อยา Generic Name พิมพ์เล็ก, Value: ลิงก์ Drive)
+        const fileMap = {};
+        formRows.forEach(r => {
+          if (r.c) {
+            const genericName = r.c[1] ? String(r.c[1].v).trim().toLowerCase() : '';
+            const fileUrl = r.c[2] ? String(r.c[2].v).trim() : '';
+            if (genericName && fileUrl) {
+              fileMap[genericName] = fileUrl;
+            }
           }
-          updateDashboard(allDrugs);
-          document.getElementById('last-update').innerText = `อัปเดตล่าสุด: ${new Date().toLocaleTimeString('th-TH')}`;
-        },
-        error: function(err) {
-          console.error("Error fetching data:", err);
-          document.getElementById('drug-table-body').innerHTML = 
-            `<tr><td colspan="6" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการโหลดข้อมูล</td></tr>`;
-        }
-      });
+        });
+
+        // แมตช์ข้อมูลรายการยาหลักกับลิงก์ไฟล์
+        allDrugs = mainRows.map(r => {
+          if (!r.c) return null;
+          const generic = r.c[1] ? String(r.c[1].v).trim() : '';
+          const trade = r.c[2] ? String(r.c[2].v).trim() : '';
+          const status = r.c[3] ? String(r.c[3].v).trim() : '';
+          const altDrug = r.c[4] ? String(r.c[4].v).trim() : '';
+          const note = r.c[5] ? String(r.c[5].v).trim() : '';
+          const expDate = r.c[6] ? String(r.c[6].f || r.c[6].v).trim() : '';
+          
+          // ลิงก์ไฟล์เดิมจากคอลัมน์ H (ถ้าระบุ) หรือจาก Google Form
+          const directFileUrl = r.c[7] ? String(r.c[7].v).trim() : '';
+          const formFileUrl = fileMap[generic.toLowerCase()] || '';
+
+          return {
+            generic,
+            trade,
+            status,
+            altDrug,
+            note,
+            expDate,
+            fileUrl: directFileUrl || formFileUrl
+          };
+        }).filter(item => item && item.generic !== '');
+
+        updateDashboard(allDrugs);
+        document.getElementById('last-update').innerText = `อัปเดตล่าสุด: ${new Date().toLocaleTimeString('th-TH')}`;
+
+      } catch (err) {
+        console.error("Error loading data:", err);
+        document.getElementById('drug-table-body').innerHTML = 
+          `<tr><td colspan="6" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets</td></tr>`;
+      }
     }
 
     function updateDashboard(data) {
@@ -123,47 +168,32 @@
       const searchVal = document.getElementById('search-input').value.toLowerCase();
       const statusVal = document.getElementById('status-filter').value;
 
-      const filtered = data.filter(row => {
-        const genericName = String(row[1] || '').toLowerCase();
-        const tradeName = String(row[2] || '').toLowerCase();
-        const status = String(row[3] || '');
-
-        const matchesSearch = genericName.includes(searchVal) || tradeName.includes(searchVal);
-        const matchesStatus = statusVal === 'ALL' || status.includes(statusVal);
+      const filtered = data.filter(item => {
+        const matchesSearch = item.generic.toLowerCase().includes(searchVal) || 
+                              item.trade.toLowerCase().includes(searchVal);
+        const matchesStatus = statusVal === 'ALL' || item.status.includes(statusVal);
         return matchesSearch && matchesStatus;
       });
 
       document.getElementById('stat-total').innerText = data.length;
-      document.getElementById('stat-critical').innerText = data.filter(r => String(r[3] || '').includes('ขาดวิกฤต')).length;
-      document.getElementById('stat-limited').innerText = data.filter(r => String(r[3] || '').includes('มีจำกัด')).length;
+      document.getElementById('stat-critical').innerText = data.filter(i => i.status.includes('ขาดวิกฤต')).length;
+      document.getElementById('stat-limited').innerText = data.filter(i => i.status.includes('มีจำกัด')).length;
 
       if (filtered.length === 0) {
         tbody.innerHTML = `<tr><td colspan="6" class="text-center p-8 text-slate-400">ไม่พบข้อมูลที่ค้นหา</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = filtered.map(row => {
-        const generic = row[1] || '-';
-        const trade = row[2] ? `(${row[2]})` : '';
-        const status = row[3] || 'ไม่ระบุ';
-        const altDrug = row[4] || '-';
-        const note = row[5] || '-';
-        const expDate = row[6] || '-';
-        
-        // ดึงเฉพาะลิงก์ข้อความจากคอลัมน์ H (Index 7) มาแสดงผลโดยตรง
-        const fileUrl = String(row[7] || '').trim();
-
+      tbody.innerHTML = filtered.map(item => {
         let badgeStyle = 'bg-slate-100 text-slate-700';
-        if (status.includes('ขาดวิกฤต')) badgeStyle = 'bg-red-100 text-red-700 border border-red-200';
-        else if (status.includes('มีจำกัด')) badgeStyle = 'bg-amber-100 text-amber-700 border border-amber-200';
-        else if (status.includes('ปกติ')) badgeStyle = 'bg-emerald-100 text-emerald-700 border border-emerald-200';
+        if (item.status.includes('ขาดวิกฤต')) badgeStyle = 'bg-red-100 text-red-700 border border-red-200';
+        else if (item.status.includes('มีจำกัด')) badgeStyle = 'bg-amber-100 text-amber-700 border border-amber-200';
+        else if (item.status.includes('ปกติ')) badgeStyle = 'bg-emerald-100 text-emerald-700 border border-emerald-200';
 
         let attachmentHtml = `<span class="text-xs text-slate-400">ไม่มีไฟล์</span>`;
-        
-        // ถ้าเป็นข้อความลิงก์ (ขึ้นต้นด้วย http) ให้แสดงปุ่มกดเปิดลิงก์ทันที
-        if (fileUrl.startsWith('http')) {
+        if (item.fileUrl && item.fileUrl.startsWith('http')) {
           attachmentHtml = `
-            <a href="${fileUrl}" target="_blank" rel="noopener noreferrer" 
+            <a href="${item.fileUrl}" target="_blank" rel="noopener noreferrer" 
                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition shadow-sm">
               <span>📄</span> เปิดดูลิงก์เอกสาร
             </a>
@@ -173,17 +203,17 @@
         return `
           <tr class="hover:bg-slate-50 transition-colors">
             <td class="p-4">
-              <div class="font-bold text-slate-800">${generic}</div>
-              <div class="text-xs text-slate-400">${trade}</div>
+              <div class="font-bold text-slate-800">${item.generic}</div>
+              <div class="text-xs text-slate-400">${item.trade ? `(${item.trade})` : ''}</div>
             </td>
             <td class="p-4">
               <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${badgeStyle}">
-                ${status}
+                ${item.status || 'ไม่ระบุ'}
               </span>
             </td>
-            <td class="p-4 font-medium text-emerald-700">${altDrug}</td>
-            <td class="p-4 text-slate-600">${note}</td>
-            <td class="p-4 text-slate-500 font-mono text-xs">${expDate}</td>
+            <td class="p-4 font-medium text-emerald-700">${item.altDrug || '-'}</td>
+            <td class="p-4 text-slate-600">${item.note || '-'}</td>
+            <td class="p-4 text-slate-500 font-mono text-xs">${item.expDate || '-'}</td>
             <td class="p-4">${attachmentHtml}</td>
           </tr>
         `;
@@ -193,7 +223,7 @@
     document.getElementById('search-input').addEventListener('input', () => updateDashboard(allDrugs));
     document.getElementById('status-filter').addEventListener('change', () => updateDashboard(allDrugs));
 
-    fetchDrugData();
+    fetchAllData();
   </script>
 </body>
 </html>
