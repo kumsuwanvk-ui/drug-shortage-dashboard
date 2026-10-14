@@ -77,11 +77,12 @@
               <th class="p-4">ยาที่ใช้ทดแทนได้</th>
               <th class="p-4">คำแนะนำการสั่งจ่าย</th>
               <th class="p-4">กำหนดการเข้าคลัง</th>
+              <th class="p-4">ใบแจ้งยาขาด / เอกสารแนบ</th>
             </tr>
           </thead>
           <tbody id="drug-table-body" class="divide-y divide-slate-100 text-sm">
             <tr>
-              <td colspan="5" class="text-center p-8 text-slate-400">กำลังดึงข้อมูลล่าสุดจาก Google Sheets...</td>
+              <td colspan="6" class="text-center p-8 text-slate-400">กำลังดึงข้อมูลล่าสุดจาก Google Sheets...</td>
             </tr>
           </tbody>
         </table>
@@ -90,8 +91,11 @@
   </main>
 
   <script>
-    // ⚠️ นำ URL ลิงก์ CSV ที่ได้จาก Phase 1 (ขั้นตอน 1.2) มาวางแทนที่บรรทัดด้านล่างนี้
+    // URL ลิงก์ CSV จาก Google Sheets
     const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTei4cEazVvl35auQEcyHkjD9_SydkzxBC9-GHXsNmMrSArtg4Sf3lWDVzDTUd5inlimijn08KlSTdq/pub?gid=0&single=true&output=csv';
+
+    // ลิงก์ Google Form สำหรับแนบเอกสารย้อนหลัง (Pre-filled Link)
+    const FORM_BASE_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdHsDnN8eg5PnFj3vHIyLYfPM_ikRm2zjxWalTjijDGCl0cdg/viewform?usp=pp_url&entry.636198151=';
 
     let allDrugs = [];
 
@@ -108,7 +112,7 @@
         error: function(err) {
           console.error("Error fetching data:", err);
           document.getElementById('drug-table-body').innerHTML = 
-            `<tr><td colspan="5" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาตรวจสอบลิงก์ CSV</td></tr>`;
+            `<tr><td colspan="6" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาตรวจสอบลิงก์ CSV</td></tr>`;
         }
       });
     }
@@ -130,39 +134,11 @@
       document.getElementById('stat-limited').innerText = data.filter(i => (i.Status || '').includes('มีจำกัด')).length;
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center p-8 text-slate-400">ไม่พบข้อมูลที่ค้นหา</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center p-8 text-slate-400">ไม่พบข้อมูลที่ค้นหา</td></tr>`;
         return;
       }
 
       tbody.innerHTML = filtered.map(item => {
         let badgeStyle = 'bg-slate-100 text-slate-700';
         if ((item.Status || '').includes('ขาดวิกฤต')) badgeStyle = 'bg-red-100 text-red-700 border border-red-200';
-        else if ((item.Status || '').includes('มีจำกัด')) badgeStyle = 'bg-amber-100 text-amber-700 border border-amber-200';
-        else if ((item.Status || '').includes('ปกติ')) badgeStyle = 'bg-emerald-100 text-emerald-700 border border-emerald-200';
-
-        return `
-          <tr class="hover:bg-slate-50 transition-colors">
-            <td class="p-4">
-              <div class="font-bold text-slate-800">${item.Generic_Name || '-'}</div>
-              <div class="text-xs text-slate-400">${item.Trade_Name ? `(${item.Trade_Name})` : ''}</div>
-            </td>
-            <td class="p-4">
-              <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${badgeStyle}">
-                ${item.Status || 'ไม่ระบุ'}
-              </span>
-            </td>
-            <td class="p-4 font-medium text-emerald-700">${item.Alternative_Drug || '-'}</td>
-            <td class="p-4 text-slate-600">${item.Note || '-'}</td>
-            <td class="p-4 text-slate-500 font-mono text-xs">${item.Expected_Date || '-'}</td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    document.getElementById('search-input').addEventListener('input', () => updateDashboard(allDrugs));
-    document.getElementById('status-filter').addEventListener('change', () => updateDashboard(allDrugs));
-
-    fetchDrugData();
-  </script>
-</body>
-</html>
+        else if ((item.Status || '').includes('มีจำ
