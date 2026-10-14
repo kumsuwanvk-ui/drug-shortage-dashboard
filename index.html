@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบแจ้งสถานะยาขาดคลัง (Drug Shortage Dashboard)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style> body { font-family: 'Prompt', sans-serif; } </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+
+  <!-- Header -->
+  <header class="bg-indigo-700 text-white shadow-lg py-6 px-4 mb-6">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+      <div>
+        <h1 class="text-2xl md:text-3xl font-bold">🏥 ระบบแจ้งสถานะยาขาดคลัง</h1>
+        <p class="text-indigo-200 text-sm mt-1">ข้อมูลสถานะยาและการสั่งจ่ายสำหรับบุคลากรทางการแพทย์</p>
+      </div>
+      <div id="last-update" class="text-xs bg-indigo-800 px-3 py-2 rounded-lg border border-indigo-500/30">
+        กำลังโหลดข้อมูล...
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 pb-12">
+    <!-- Cards สรุปภาพรวม -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-slate-500">รายการยาในระบบทั้งหมด</p>
+          <h3 id="stat-total" class="text-3xl font-bold text-slate-800 mt-1">0</h3>
+        </div>
+        <div class="p-3 bg-slate-100 rounded-lg text-2xl">💊</div>
+      </div>
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-red-100 flex items-center justify-between border-l-4 border-l-red-500">
+        <div>
+          <p class="text-sm font-medium text-slate-500">ขาดวิกฤต (ไม่มีสำรอง)</p>
+          <h3 id="stat-critical" class="text-3xl font-bold text-red-600 mt-1">0</h3>
+        </div>
+        <div class="p-3 bg-red-50 rounded-lg text-2xl">🚨</div>
+      </div>
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-amber-100 flex items-center justify-between border-l-4 border-l-amber-500">
+        <div>
+          <p class="text-sm font-medium text-slate-500">มีจำกัด / มียาแทน</p>
+          <h3 id="stat-limited" class="text-3xl font-bold text-amber-600 mt-1">0</h3>
+        </div>
+        <div class="p-3 bg-amber-50 rounded-lg text-2xl">⚠️</div>
+      </div>
+    </div>
+
+    <!-- ฟิลเตอร์ค้นหา -->
+    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6 flex flex-col md:flex-row gap-4">
+      <div class="flex-1">
+        <input type="text" id="search-input" placeholder="🔍 ค้นหาชื่อยา (Generic / Trade Name)..." 
+               class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+      <div class="w-full md:w-48">
+        <select id="status-filter" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="ALL">สถานะทั้งหมด</option>
+          <option value="ขาดวิกฤต">🔴 ขาดวิกฤต</option>
+          <option value="มีจำกัด">🟡 มีจำกัด</option>
+          <option value="ปกติ">🟢 ปกติ</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ตารางแสดงรายการยา -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 text-sm font-semibold">
+              <th class="p-4">ชื่อยา (Generic / Trade)</th>
+              <th class="p-4">สถานะ</th>
+              <th class="p-4">ยาที่ใช้ทดแทนได้</th>
+              <th class="p-4">คำแนะนำการสั่งจ่าย</th>
+              <th class="p-4">กำหนดการเข้าคลัง</th>
+            </tr>
+          </thead>
+          <tbody id="drug-table-body" class="divide-y divide-slate-100 text-sm">
+            <tr>
+              <td colspan="5" class="text-center p-8 text-slate-400">กำลังดึงข้อมูลล่าสุดจาก Google Sheets...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ⚠️ นำ URL ลิงก์ CSV ที่ได้จาก Phase 1 (ขั้นตอน 1.2) มาวางแทนที่บรรทัดด้านล่างนี้
+    const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTei4cEazVvl35auQEcyHkjD9_SydkzxBC9-GHXsNmMrSArtg4Sf3lWDVzDTUd5inlimijn08KlSTdq/pub?gid=0&single=true&output=csv';
+
+    let allDrugs = [];
+
+    function fetchDrugData() {
+      Papa.parse(GOOGLE_SHEET_CSV_URL, {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          allDrugs = results.data;
+          updateDashboard(allDrugs);
+          document.getElementById('last-update').innerText = `อัปเดตล่าสุด: ${new Date().toLocaleTimeString('th-TH')}`;
+        },
+        error: function(err) {
+          console.error("Error fetching data:", err);
+          document.getElementById('drug-table-body').innerHTML = 
+            `<tr><td colspan="5" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาตรวจสอบลิงก์ CSV</td></tr>`;
+        }
+      });
+    }
+
+    function updateDashboard(data) {
+      const tbody = document.getElementById('drug-table-body');
+      const searchVal = document.getElementById('search-input').value.toLowerCase();
+      const statusVal = document.getElementById('status-filter').value;
+
+      const filtered = data.filter(item => {
+        const matchesSearch = (item.Generic_Name || '').toLowerCase().includes(searchVal) || 
+                              (item.Trade_Name || '').toLowerCase().includes(searchVal);
+        const matchesStatus = statusVal === 'ALL' || (item.Status || '').includes(statusVal);
+        return matchesSearch && matchesStatus;
+      });
+
+      document.getElementById('stat-total').innerText = data.length;
+      document.getElementById('stat-critical').innerText = data.filter(i => (i.Status || '').includes('ขาดวิกฤต')).length;
+      document.getElementById('stat-limited').innerText = data.filter(i => (i.Status || '').includes('มีจำกัด')).length;
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center p-8 text-slate-400">ไม่พบข้อมูลที่ค้นหา</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(item => {
+        let badgeStyle = 'bg-slate-100 text-slate-700';
+        if ((item.Status || '').includes('ขาดวิกฤต')) badgeStyle = 'bg-red-100 text-red-700 border border-red-200';
+        else if ((item.Status || '').includes('มีจำกัด')) badgeStyle = 'bg-amber-100 text-amber-700 border border-amber-200';
+        else if ((item.Status || '').includes('ปกติ')) badgeStyle = 'bg-emerald-100 text-emerald-700 border border-emerald-200';
+
+        return `
+          <tr class="hover:bg-slate-50 transition-colors">
+            <td class="p-4">
+              <div class="font-bold text-slate-800">${item.Generic_Name || '-'}</div>
+              <div class="text-xs text-slate-400">${item.Trade_Name ? `(${item.Trade_Name})` : ''}</div>
+            </td>
+            <td class="p-4">
+              <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${badgeStyle}">
+                ${item.Status || 'ไม่ระบุ'}
+              </span>
+            </td>
+            <td class="p-4 font-medium text-emerald-700">${item.Alternative_Drug || '-'}</td>
+            <td class="p-4 text-slate-600">${item.Note || '-'}</td>
+            <td class="p-4 text-slate-500 font-mono text-xs">${item.Expected_Date || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    document.getElementById('search-input').addEventListener('input', () => updateDashboard(allDrugs));
+    document.getElementById('status-filter').addEventListener('change', () => updateDashboard(allDrugs));
+
+    fetchDrugData();
+  </script>
+</body>
+</html>
