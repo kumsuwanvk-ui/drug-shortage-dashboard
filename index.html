@@ -90,15 +90,15 @@
   </main>
 
   <script>
-    // 1. ID ไฟล์ข้อมูลยาหลัก
-    const DRUG_DB_ID = '1lEfUkbS61fEm41dXq_Lp4oT-RtnyEdHCWgrNbx8zz4g';
+    // 1. ID สเปรดชีตหลัก (ระบบจัดการยาขาดคลัง_DB)
+    const MAIN_DB_ID = '1lEfUkbS61fEm41dXq_Lp4oT-RtnyEdHCWgrNbx8zz4g';
     
-    // 2. ID ไฟล์ตอบกลับจาก Google Form (เก็บลิงก์ไฟล์)
+    // 2. ID สเปรดชีตตอบกลับจาก Google Form (เก็บลิงก์รูป/เอกสารแนบ)
     const FORM_RESPONSES_ID = '15XM8DK5ddLTKWlkx-iQW9CS_9czWh8AZf-7iabkuW34';
 
     let allDrugs = [];
 
-    // ฟังก์ชันช่วยดึงข้อมูลด้วย GViz API ความเร็วสูง
+    // ฟังก์ชันดึงข้อมูล GViz
     async function fetchGViz(sheetId, sheetName = '') {
       const querySheet = sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : '';
       const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json${querySheet}`;
@@ -110,13 +110,13 @@
 
     async function fetchAllData() {
       try {
-        // ดึงทั้ง 2 ชีตพร้อมกัน (Parallel) เพื่อความรวดเร็ว
+        // ดึงทั้ง 2 สเปรดชีตขนานกัน
         const [mainRows, formRows] = await Promise.all([
-          fetchGViz(DRUG_DB_ID),
-          fetchGViz(FORM_RESPONSES_ID)
+          fetchGViz(MAIN_DB_ID, 'ชีต1'),
+          fetchGViz(FORM_RESPONSES_ID, 'การตอบแบบฟอร์ม 1')
         ]);
 
-        // สร้าง Map ของไฟล์แนบ (Key: ชื่อยา Generic Name พิมพ์เล็ก, Value: ลิงก์ Drive)
+        // สร้าง Map เก็บลิงก์ไฟล์แนบโดยใช้ ชื่อสามัญทางยา (Generic Name) เป็นตัวแมตช์
         const fileMap = {};
         formRows.forEach(r => {
           if (r.c) {
@@ -128,7 +128,7 @@
           }
         });
 
-        // แมตช์ข้อมูลรายการยาหลักกับลิงก์ไฟล์
+        // แมตช์ข้อมูลยาหลักเข้ากับลิงก์
         allDrugs = mainRows.map(r => {
           if (!r.c) return null;
           const generic = r.c[1] ? String(r.c[1].v).trim() : '';
@@ -138,9 +138,9 @@
           const note = r.c[5] ? String(r.c[5].v).trim() : '';
           const expDate = r.c[6] ? String(r.c[6].f || r.c[6].v).trim() : '';
           
-          // ลิงก์ไฟล์เดิมจากคอลัมน์ H (ถ้าระบุ) หรือจาก Google Form
+          // ลิงก์ในคอลัมน์ H (ถ้ามี) หรือลิงก์จาก Google Form ตอบกลับ
           const directFileUrl = r.c[7] ? String(r.c[7].v).trim() : '';
-          const formFileUrl = fileMap[generic.toLowerCase()] || '';
+          const matchedFileUrl = fileMap[generic.toLowerCase()] || '';
 
           return {
             generic,
@@ -149,9 +149,9 @@
             altDrug,
             note,
             expDate,
-            fileUrl: directFileUrl || formFileUrl
+            fileUrl: directFileUrl || matchedFileUrl
           };
-        }).filter(item => item && item.generic !== '');
+        }).filter(item => item && item.generic !== '' && item.generic !== 'Generic_Name');
 
         updateDashboard(allDrugs);
         document.getElementById('last-update').innerText = `อัปเดตล่าสุด: ${new Date().toLocaleTimeString('th-TH')}`;
@@ -159,7 +159,7 @@
       } catch (err) {
         console.error("Error loading data:", err);
         document.getElementById('drug-table-body').innerHTML = 
-          `<tr><td colspan="6" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets</td></tr>`;
+          `<tr><td colspan="6" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการดึงข้อมูล กรุณารีเฟรชหน้าเว็บอีกครั้ง</td></tr>`;
       }
     }
 
