@@ -90,77 +90,49 @@
   </main>
 
   <script>
-    // 1. ID สเปรดชีตหลัก (ระบบจัดการยาขาดคลัง_DB)
+    // ID สเปรดชีตหลัก (ระบบจัดการยาขาดคลัง_DB)
     const MAIN_DB_ID = '1lEfUkbS61fEm41dXq_Lp4oT-RtnyEdHCWgrNbx8zz4g';
-    
-    // 2. ID สเปรดชีตตอบกลับจาก Google Form (เก็บลิงก์รูป/เอกสารแนบ)
-    const FORM_RESPONSES_ID = '15XM8DK5ddLTKWlkx-iQW9CS_9czWh8AZf-7iabkuW34';
 
     let allDrugs = [];
 
-    // ฟังก์ชันดึงข้อมูล GViz
-    async function fetchGViz(sheetId, sheetName = '') {
-      const querySheet = sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : '';
-      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json${querySheet}`;
-      const res = await fetch(url);
-      const text = await res.text();
-      const json = JSON.parse(text.substring(47, text.length - 2));
-      return json.table.rows || [];
-    }
+    function fetchDrugData() {
+      // ดึงจาก GViz API โดยตรง
+      const url = `https://docs.google.com/spreadsheets/d/${MAIN_DB_ID}/gviz/tq?tqx=out:json`;
 
-    async function fetchAllData() {
-      try {
-        // ดึงทั้ง 2 สเปรดชีตขนานกัน
-        const [mainRows, formRows] = await Promise.all([
-          fetchGViz(MAIN_DB_ID, 'ชีต1'),
-          fetchGViz(FORM_RESPONSES_ID, 'การตอบแบบฟอร์ม 1')
-        ]);
+      fetch(url)
+        .then(res => res.text())
+        .then(text => {
+          // แปลง JSONP ของ GViz ให้เป็น JSON Object
+          const startIdx = text.indexOf('{');
+          const endIdx = text.lastIndexOf('}');
+          if (startIdx === -1 || endIdx === -1) throw new Error("Invalid response format");
 
-        // สร้าง Map เก็บลิงก์ไฟล์แนบโดยใช้ ชื่อสามัญทางยา (Generic Name) เป็นตัวแมตช์
-        const fileMap = {};
-        formRows.forEach(r => {
-          if (r.c) {
-            const genericName = r.c[1] ? String(r.c[1].v).trim().toLowerCase() : '';
-            const fileUrl = r.c[2] ? String(r.c[2].v).trim() : '';
-            if (genericName && fileUrl) {
-              fileMap[genericName] = fileUrl;
-            }
-          }
+          const jsonString = text.substring(startIdx, endIdx + 1);
+          const json = JSON.parse(jsonString);
+          const rows = json.table.rows || [];
+
+          allDrugs = rows.map(r => {
+            if (!r.c) return null;
+
+            const generic = r.c[1] ? String(r.c[1].v || '').trim() : '';
+            const trade = r.c[2] ? String(r.c[2].v || '').trim() : '';
+            const status = r.c[3] ? String(r.c[3].v || '').trim() : '';
+            const altDrug = r.c[4] ? String(r.c[4].v || '').trim() : '';
+            const note = r.c[5] ? String(r.c[5].v || '').trim() : '';
+            const expDate = r.c[6] ? String(r.c[6].f || r.c[6].v || '').trim() : '';
+            const fileUrl = r.c[7] ? String(r.c[7].v || '').trim() : ''; // คอลัมน์ H
+
+            return { generic, trade, status, altDrug, note, expDate, fileUrl };
+          }).filter(item => item && item.generic !== '' && item.generic !== 'Generic_Name');
+
+          updateDashboard(allDrugs);
+          document.getElementById('last-update').innerText = `อัปเดตล่าสุด: ${new Date().toLocaleTimeString('th-TH')}`;
+        })
+        .catch(err => {
+          console.error("Error loading data:", err);
+          document.getElementById('drug-table-body').innerHTML = 
+            `<tr><td colspan="6" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการดึงข้อมูล กรุณาตรวจสอบสิทธิ์การแชร์ไฟล์ Google Sheets</td></tr>`;
         });
-
-        // แมตช์ข้อมูลยาหลักเข้ากับลิงก์
-        allDrugs = mainRows.map(r => {
-          if (!r.c) return null;
-          const generic = r.c[1] ? String(r.c[1].v).trim() : '';
-          const trade = r.c[2] ? String(r.c[2].v).trim() : '';
-          const status = r.c[3] ? String(r.c[3].v).trim() : '';
-          const altDrug = r.c[4] ? String(r.c[4].v).trim() : '';
-          const note = r.c[5] ? String(r.c[5].v).trim() : '';
-          const expDate = r.c[6] ? String(r.c[6].f || r.c[6].v).trim() : '';
-          
-          // ลิงก์ในคอลัมน์ H (ถ้ามี) หรือลิงก์จาก Google Form ตอบกลับ
-          const directFileUrl = r.c[7] ? String(r.c[7].v).trim() : '';
-          const matchedFileUrl = fileMap[generic.toLowerCase()] || '';
-
-          return {
-            generic,
-            trade,
-            status,
-            altDrug,
-            note,
-            expDate,
-            fileUrl: directFileUrl || matchedFileUrl
-          };
-        }).filter(item => item && item.generic !== '' && item.generic !== 'Generic_Name');
-
-        updateDashboard(allDrugs);
-        document.getElementById('last-update').innerText = `อัปเดตล่าสุด: ${new Date().toLocaleTimeString('th-TH')}`;
-
-      } catch (err) {
-        console.error("Error loading data:", err);
-        document.getElementById('drug-table-body').innerHTML = 
-          `<tr><td colspan="6" class="text-center p-8 text-red-500">เกิดข้อผิดพลาดในการดึงข้อมูล กรุณารีเฟรชหน้าเว็บอีกครั้ง</td></tr>`;
-      }
     }
 
     function updateDashboard(data) {
@@ -223,7 +195,7 @@
     document.getElementById('search-input').addEventListener('input', () => updateDashboard(allDrugs));
     document.getElementById('status-filter').addEventListener('change', () => updateDashboard(allDrugs));
 
-    fetchAllData();
+    fetchDrugData();
   </script>
 </body>
 </html>
